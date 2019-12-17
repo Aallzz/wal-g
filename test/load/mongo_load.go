@@ -270,11 +270,58 @@ func (mw *MongoWorker) addMongoOp(client *mongo.Client, sop string) error {
 			}
 			mw.mongoDeleteOp(client, mdo)
 			break
+		case "c":
+			commandDoc, err := parseCommandOp(x)
+			if err != nil {
+				return err
+			}
+			mw.mongoRunCommandOp(client, commandDoc)
 		default:
 			return fmt.Errorf("unknown command %v", x["op"])
 		}
 	}
 	return nil
+}
+
+type MongoRunCommandOp struct {
+	DbName string
+	Ctx    string
+	Doc    bson.D
+}
+
+func parseCommandOp(cd map[string]interface{}) (*MongoRunCommandOp, error) {
+	var res MongoRunCommandOp
+	var ok bool
+	res.DbName, ok = cd["db"].(string)
+	if !ok {
+		return nil, fmt.Errorf("error1")
+	}
+	res.Ctx, ok = cd["db"].(string)
+	if !ok {
+		return nil, fmt.Errorf("error2")
+	}
+	x, err := bson.Marshal(cd["doc"])
+	if err != nil {
+		return nil, err
+	}
+	var y bson.D
+	err = bson.Unmarshal(x, &y)
+
+	res.Doc = y
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (mw *MongoWorker) mongoRunCommandOp(client *mongo.Client, op *MongoRunCommandOp) {
+	mw.fs = append(mw.fs, func() {
+		db := client.Database(op.DbName)
+		var result bson.M
+		_ = db.RunCommand(contextByName[op.Ctx], op.Doc).Decode(&result)
+		<-mw.ch
+		mw.wg.Done()
+	})
 }
 
 func (mw *MongoWorker) mongoInsertOp(client *mongo.Client, op *MongoInsertOp) {
@@ -332,6 +379,8 @@ func main() {
 
 	jsonstrins := `{"op":"i", "db":"testName1","cl":"testName2","ctx":"todo","docs":[{"Key":"name1", "sub":"asdf"},{"Value":"Alice"}],"opts":{"MakeLogs":"true"}}`
 	jsonstrdel := `{"op":"d", "db":"testName1","cl":"testName2","ctx":"todo","many":"true","filter":{"Key":"name1"},"opts":{"Locale":"fr","Many":"true","MakeLogs":"true"}}`
+	jsoncmd := `{"op":"c", "db":"testName1", "ctx":"todo", "doc":{"explain":{"find":"testName2"}}}`
+	jsonfind := `{"op":"c", "db":"testName1", "ctx":"todo", "doc":{"find":"testName2"}}`
 
 	err = mw.addMongoOp(cli, "["+strings.Join(multiplyInArray(jsonstrins, 3), ",")+"]")
 	if err != nil {
@@ -342,6 +391,17 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
+
+	err = mw.addMongoOp(cli, "["+ jsonfind +"]")
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	err = mw.addMongoOp(cli, "["+ jsoncmd +"]")
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	mw.run()
 
 	cur, err := cli.Database("testName1").Collection("testName2").Find(context.TODO(), bson.M{})
