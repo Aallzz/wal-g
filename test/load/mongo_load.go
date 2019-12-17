@@ -8,205 +8,14 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"log"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 )
 
-type MongoInsertOp struct {
-	MongoInsertRaw
-
-	insertOneOpts  *options.InsertOneOptions
-	insertManyOpts *options.InsertManyOptions
-	makeLogs       bool
-	logs           chan string
-}
-
-type MongoInsertRaw struct {
-	DbName  string            `json:"db"`
-	ColName string            `json:"cl"`
-	Ctx     string            `json:"ctx"`
-	Docs    []interface{}     `json:"docs"`
-	Opts    map[string]string `json:"opts"`
-}
-
-func (mir *MongoInsertRaw) transformMongoInsertRaw() (*MongoInsertOp, error) {
-	var res MongoInsertOp
-	res.MongoInsertRaw = *mir
-	res.insertOneOpts = &options.InsertOneOptions{}
-	res.insertManyOpts = &options.InsertManyOptions{}
-
-	if value, ok := mir.Opts["BypassDocumentValidation"]; ok {
-		boolValue, err := strconv.ParseBool(value)
-		if err != nil {
-			return nil, err
-		}
-		res.insertOneOpts.BypassDocumentValidation = &boolValue
-		res.insertManyOpts.BypassDocumentValidation = &boolValue
-	}
-	if value, ok := mir.Opts["Ordered"]; ok {
-		boolValue, err := strconv.ParseBool(value)
-		if err != nil {
-			return nil, err
-		}
-		res.insertManyOpts.Ordered = &boolValue
-	}
-	if value, ok := mir.Opts["MakeLogs"]; ok {
-		boolValue, err := strconv.ParseBool(value)
-		if err != nil {
-			return nil, err
-		}
-		res.makeLogs = boolValue
-	}
-	return &res, nil
-}
-
-func parseInsertOp(opdata map[string]interface{}) (*MongoInsertOp, error) {
-	mio := MongoInsertRaw{}
-	x, _ := json.Marshal(opdata)
-	err := json.Unmarshal(x, &mio)
-	if err != nil {
-		return nil, fmt.Errorf("error in parsing insert operation: %v", err)
-	}
-	return mio.transformMongoInsertRaw()
-}
-
-type MongoDeleteOp struct {
-	MongoDeleteRaw
-
-	many     bool
-	opts     *options.DeleteOptions
-	makeLogs bool
-	logs     chan string
-}
-
-type MongoDeleteRaw struct {
-	DbName  string                 `json:"db"`
-	ColName string                 `json:"cl"`
-	Ctx     string                 `json:"ctx"`
-	Filter  interface{}            `json:"filter"`
-	Opts    map[string]interface{} `json:"opts"`
-}
-
-func (mdr *MongoDeleteRaw) transformMongoDeleteRaw() (*MongoDeleteOp, error) {
-	var res MongoDeleteOp
-	res.MongoDeleteRaw = *mdr
-	res.opts = &options.DeleteOptions{}
-	if value, ok := mdr.Opts["Collation"]; ok {
-		x, _ := json.Marshal(value)
-		err := json.Unmarshal(x, &res.opts.Collation)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if value, ok := mdr.Opts["MakeLogs"]; ok {
-		strBoolValue, ok := value.(string)
-		if !ok {
-			return nil, fmt.Errorf("error in transforming MondoDeleteRaw type to MongoDeleteOp type: expected string for MakeLogs opt")
-		}
-		boolValue, err := strconv.ParseBool(strBoolValue)
-		if err != nil {
-			return nil, err
-		}
-		res.makeLogs = boolValue
-	}
-	if value, ok := mdr.Opts["Many"]; ok {
-		strBoolValue, ok := value.(string)
-		if !ok {
-			return nil, fmt.Errorf("error in transforming MondoDeleteRaw type to MongoDeleteOp type: expected string for Many opt")
-		}
-		boolValue, err := strconv.ParseBool(strBoolValue)
-		if err != nil {
-			return nil, err
-		}
-		res.many = boolValue
-	}
-	return &res, nil
-}
-
-func parseDeleteOp(opdata map[string]interface{}) (*MongoDeleteOp, error) {
-	mdo := MongoDeleteRaw{}
-	x, _ := json.Marshal(opdata)
-	err := json.Unmarshal(x, &mdo)
-	if err != nil {
-		return nil, fmt.Errorf("error in parsing delete operation: %v", err)
-	}
-	return mdo.transformMongoDeleteRaw()
-}
-
 var contextByName = map[string]context.Context{
 	"todo":       context.TODO(),
 	"background": context.Background(),
-}
-
-func mongoInsert(mongoClient *mongo.Client, op *MongoInsertOp) {
-	collection := mongoClient.Database(op.DbName).Collection(op.ColName)
-	if len(op.Docs) == 1 {
-		inOneRes, err := collection.InsertOne(contextByName[op.Ctx], op.Docs[0], op.insertOneOpts)
-		if op.makeLogs {
-			var msg string
-			if err != nil {
-				msg = fmt.Sprintf("Failed insertion of one document in mongo database %s in %s collection with error: %v", op.DbName, op.ColName, err)
-			} else {
-				msg = fmt.Sprintf(`Successfull insertion of one document with id "%v" in mongo database %s in %s collectoin`, inOneRes.InsertedID, op.DbName, op.ColName)
-			}
-			tracelog.InfoLogger.Println(msg)
-		}
-		if err != nil {
-			log.Fatalln(err)
-		}
-	} else {
-		inManyRes, err := collection.InsertMany(contextByName[op.Ctx], op.Docs, op.insertManyOpts)
-		if op.makeLogs {
-			var msg string
-			if err != nil {
-				msg = fmt.Sprintf("Failed insertion of many documents in mongo database %s in %s collection with error: %v", op.DbName, op.ColName, err)
-			} else {
-				msg = fmt.Sprintf(`Successfull insertion of many documents with ids "%v" in mongo database %s in %s collectoin`, inManyRes.InsertedIDs, op.DbName, op.ColName)
-			}
-			tracelog.InfoLogger.Println(msg)
-		}
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}
-}
-
-func mongoDelete(mongoClient *mongo.Client, op *MongoDeleteOp) {
-	collection := mongoClient.Database(op.DbName).Collection(op.ColName)
-	if op.many {
-		delRes, err := collection.DeleteMany(contextByName[op.Ctx], op.Filter, op.opts)
-		if op.makeLogs {
-			var msg string
-			if err != nil {
-				msg = fmt.Sprintf("Failed deletion of many documents in mongo database %s in %s collection with error: %v", op.DbName, op.ColName, err)
-			} else {
-				x, _ := json.Marshal(op.Filter)
-				msg = fmt.Sprintf(`Successfull deletion of %d document(s) in mongo database %s in %s collectoin with filter %+v`, delRes.DeletedCount, op.DbName, op.ColName, string(x))
-			}
-			tracelog.InfoLogger.Println(msg)
-		}
-		if err != nil {
-			log.Fatalln(err)
-		}
-	} else {
-		delRes, err := collection.DeleteOne(contextByName[op.Ctx], op.Filter, op.opts)
-		if op.makeLogs {
-			var msg string
-			if err != nil {
-				msg = fmt.Sprintf("Failed deletion of many documents in mongo database %s in %s collection with error: %v", op.DbName, op.ColName, err)
-			} else {
-				x, _ := json.Marshal(op.Filter)
-				msg = fmt.Sprintf(`Successfull deletion of %d document(s) in mongo database %s in %s collectoin with filter %+v`, delRes.DeletedCount, op.DbName, op.ColName, string(x))
-			}
-			tracelog.InfoLogger.Println(msg)
-		}
-		if err != nil {
-			log.Fatalln(err)
-		}
-	}
 }
 
 type MongoWorker struct {
@@ -256,20 +65,6 @@ func (mw *MongoWorker) addMongoOp(client *mongo.Client, sop string) error {
 			return fmt.Errorf("command expected to be a map, but found %s", getStringType(opdata))
 		}
 		switch x["op"] {
-		case "i":
-			mio, err := parseInsertOp(x)
-			if err != nil {
-				return err
-			}
-			mw.mongoInsertOp(client, mio)
-			break
-		case "d":
-			mdo, err := parseDeleteOp(x)
-			if err != nil {
-				return err
-			}
-			mw.mongoDeleteOp(client, mdo)
-			break
 		case "c":
 			commandDoc, err := parseCommandOp(x)
 			if err != nil {
@@ -284,33 +79,32 @@ func (mw *MongoWorker) addMongoOp(client *mongo.Client, sop string) error {
 }
 
 type MongoRunCommandOp struct {
-	DbName string
-	Ctx    string
-	Doc    bson.D
+	DbName   string `json:"db"`
+	Ctx      string `json:"ctx"`
+	MakeLogs bool   `json:"makelogs"`
+	Doc      bson.D
 }
 
 func parseCommandOp(cd map[string]interface{}) (*MongoRunCommandOp, error) {
 	var res MongoRunCommandOp
-	var ok bool
-	res.DbName, ok = cd["db"].(string)
-	if !ok {
-		return nil, fmt.Errorf("error1")
-	}
-	res.Ctx, ok = cd["db"].(string)
-	if !ok {
-		return nil, fmt.Errorf("error2")
-	}
-	x, err := bson.Marshal(cd["doc"])
+	bmrco, err := json.Marshal(cd)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot parse opts for commad: %+v", err)
+	}
+	err = json.Unmarshal(bmrco, &res)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse opts for commad: %+v", err)
+	}
+	x, err := bson.Marshal(cd["dc"])
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse opts for commad: %+v", err)
 	}
 	var y bson.D
 	err = bson.Unmarshal(x, &y)
-
-	res.Doc = y
 	if err != nil {
 		return nil, err
 	}
+	res.Doc = y
 	return &res, nil
 }
 
@@ -318,23 +112,14 @@ func (mw *MongoWorker) mongoRunCommandOp(client *mongo.Client, op *MongoRunComma
 	mw.fs = append(mw.fs, func() {
 		db := client.Database(op.DbName)
 		var result bson.M
-		_ = db.RunCommand(contextByName[op.Ctx], op.Doc).Decode(&result)
-		<-mw.ch
-		mw.wg.Done()
-	})
-}
-
-func (mw *MongoWorker) mongoInsertOp(client *mongo.Client, op *MongoInsertOp) {
-	mw.fs = append(mw.fs, func() {
-		mongoInsert(client, op)
-		<-mw.ch
-		mw.wg.Done()
-	})
-}
-
-func (mw *MongoWorker) mongoDeleteOp(client *mongo.Client, op *MongoDeleteOp) {
-	mw.fs = append(mw.fs, func() {
-		mongoDelete(client, op)
+		err := db.RunCommand(contextByName[op.Ctx], op.Doc).Decode(&result)
+		if op.MakeLogs {
+			if err != nil {
+				tracelog.InfoLogger.Printf("cannot execute runCommand: %+v", err)
+			} else {
+				tracelog.InfoLogger.Printf("Successful execution of runCommand with %+v argument", op.Doc)
+			}
+		}
 		<-mw.ch
 		mw.wg.Done()
 	})
@@ -377,10 +162,9 @@ func main() {
 
 	mw := CreateMongoWorker(1)
 
-	jsonstrins := `{"op":"i", "db":"testName1","cl":"testName2","ctx":"todo","docs":[{"Key":"name1", "sub":"asdf"},{"Value":"Alice"}],"opts":{"MakeLogs":"true"}}`
-	jsonstrdel := `{"op":"d", "db":"testName1","cl":"testName2","ctx":"todo","many":"true","filter":{"Key":"name1"},"opts":{"Locale":"fr","Many":"true","MakeLogs":"true"}}`
-	jsoncmd := `{"op":"c", "db":"testName1", "ctx":"todo", "doc":{"explain":{"find":"testName2"}}}`
-	jsonfind := `{"op":"c", "db":"testName1", "ctx":"todo", "doc":{"find":"testName2"}}`
+	jsonstrins := `{"op":"c", "db":"testName1","makelogs":true, "dc":{"insert":"testName2", "documents":[{"Key":"name1", "sub":"asdf"},{"Value":"Alice"}]}}`
+	jsonstrdel := `{"op":"c", "db":"testName1", "makelogs":true, "dc":{"delete":"testName2", "deletes":[{"q": {"Key":"name1"}, "limit":1}]}}`
+	jsonfind := `{"op":"c", "db":"testName1", "ctx":"todo", "dc":{"find":"testName2"}, "makelogs": true}`
 
 	err = mw.addMongoOp(cli, "["+strings.Join(multiplyInArray(jsonstrins, 3), ",")+"]")
 	if err != nil {
@@ -392,12 +176,7 @@ func main() {
 		fmt.Println(err)
 	}
 
-	err = mw.addMongoOp(cli, "["+ jsonfind +"]")
-	if err != nil {
-		fmt.Println(err)
-	}
-
-	err = mw.addMongoOp(cli, "["+ jsoncmd +"]")
+	err = mw.addMongoOp(cli, "["+jsonfind+"]")
 	if err != nil {
 		fmt.Println(err)
 	}
