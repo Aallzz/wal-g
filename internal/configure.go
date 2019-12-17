@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
-	"github.com/tinsane/tracelog"
 	"github.com/wal-g/storages/storage"
+	"github.com/wal-g/tracelog"
 	"github.com/wal-g/wal-g/internal/compression"
 	"github.com/wal-g/wal-g/internal/crypto"
 	"github.com/wal-g/wal-g/internal/crypto/awskms"
@@ -14,9 +14,9 @@ import (
 	"golang.org/x/time/rate"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
-	"strconv"
 )
 
 const (
@@ -334,4 +334,12 @@ func GetOplogArchiveAfterSize() (int, error) {
 		return 0, fmt.Errorf("integer expected for %s setting but given '%s': %w", OplogArchiveAfterSize, oplogArchiveAfterSizeStr, err)
 	}
 	return oplogArchiveAfterSize, nil
+}
+
+func GetRequiredSetting(setting string) (string, error) {
+	val, ok := GetSetting(setting)
+	if !ok {
+		return "", NewUnsetRequiredSettingError(setting)
+	}
+	return val, nil
 }
