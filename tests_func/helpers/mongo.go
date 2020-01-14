@@ -375,3 +375,11 @@ func MongoPurgeBackupsAfterTime(testContext *TestContextType, containerName stri
 	_, err := RunCommandInContainer(testContext, containerName, command)
 	return err
 }
+
+func MongoOplogFetch(testContext *TestContextType, containerName string) error {
+	WalgCliPath := testUtils.GetVarFromEnvList(testContext.Env, "WALG_CLIENT_PATH")
+	WalgConfPath := testUtils.GetVarFromEnvList(testContext.Env, "WALG_CONF_PATH")
+	command := []string{WalgCliPath, "--config", WalgConfPath, "oplog-fetch"}
+	_, err := RunCommandInContainer(testContext, containerName, command)
+	return err
+}

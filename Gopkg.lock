@@ -495,6 +495,14 @@
   version = "v1.0.49"
 
 [[projects]]
+  digest = "1:b8261a46d75566ebf5b4fb6bb762f54f47e6633e0995118393afc80bb1f428f5"
+  name = "github.com/olekukonko/tablewriter"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "876dd0e0227ec99c0243b639b92139915b65331a"
+  version = "v0.0.4"
+
+[[projects]]
   digest = "1:ee4d4af67d93cc7644157882329023ce9a7bcfce956a079069a9405521c7cc8d"
   name = "github.com/opencontainers/go-digest"
   packages = ["."]
@@ -1114,6 +1122,7 @@
     "github.com/jedib0t/go-pretty/table",
     "github.com/jmoiron/sqlx",
     "github.com/minio/sio",
+    "github.com/olekukonko/tablewriter",
     "github.com/pierrec/lz4",
     "github.com/pkg/errors",
     "github.com/spf13/cobra",

@@ -11,7 +11,7 @@ import (
 )
 
 func prepareTestLoad(configFile, patronFile, mongoUri string, ctx context.Context) (*mongo.Client, *os.File, error) {
-	err := generatePatronsFromFile(configFile)
+	_, err := GeneratePatronsFromFile(configFile)
 	if err != nil {
 		return nil, nil, err
 	}

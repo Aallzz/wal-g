@@ -10,6 +10,7 @@ import (
 	"github.com/DATA-DOG/godog/gherkin"
 	"github.com/docker/docker/client"
 	testHelper "github.com/wal-g/wal-g/tests_func/helpers"
+	testLoad "github.com/wal-g/wal-g/tests_func/load"
 	testUtils "github.com/wal-g/wal-g/tests_func/utils"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"log"
@@ -113,6 +114,47 @@ func FeatureContext(s *godog.Suite) {
 	s.Step(`^we delete backups retain (\d+) after #(\d+) timestamp via mongodb(\d+)$`, deleteBackupsRetainAfterTimeViaMongodb)
 	s.Step(`^we create timestamp #(\d+) via mongodb(\d+)$`, createTimestamp)
 	s.Step(`^we wait for (\d+) seconds$`, wait)
+
+	s.Step(`^load mongodb(\d+) with "([^"]*)" config$`, loadMongodbWithConfig)
+
+}
+
+func loadMongodbWithConfig(mongodbId int, configFile string) error {
+	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testUtils.GetVarFromEnvList(testContext.Env, "TEST_ID"))
+
+	patrons, err := testLoad.GeneratePatronsFromFile(configFile)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel:= context.WithTimeout(context.Background(), 8050 * time.Millisecond)
+	defer cancel()
+
+	for _, patronFile := range patrons {
+		err := func() error {
+			f, err := os.Open(patronFile)
+			if err != nil {
+				return fmt.Errorf("cannot read patron: %v", err)
+			}
+			defer f.Close()
+			roc, _, err := testLoad.ReadRawMongoOps(ctx, f, 3)
+			if err != nil {
+				return err
+			}
+			cli, err := testHelper.EnvDBConnect(testContext, nodeName)
+			if err != nil {
+				return err
+			}
+			cmdc, _ := testLoad.MakeMongoOps(ctx, cli, roc)
+			// put all results somewhere for stats maybe
+			_ := testLoad.RunMongoOpFuncs(ctx, cmdc, 3, 3)
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func wait(cnt int) error {

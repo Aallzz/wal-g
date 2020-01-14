@@ -233,25 +233,27 @@ func generatePatron(config patronConfig) error {
 	return nil
 }
 
-func generatePatronsFromFile(filepath string) error {
+func GeneratePatronsFromFile(filepath string) ([]string, error) {
 	rand.Seed(time.Now().UnixNano())
+	var patrons []string
 	hndl, err := os.Open(filepath)
 	if err != nil {
-		return fmt.Errorf("cannot generate patrons from file: %v", err)
+		return []string{}, fmt.Errorf("cannot generate patrons from file: %v", err)
 	}
 	defer hndl.Close()
 	decoder := json.NewDecoder(hndl)
 	var configs []patronConfig
 	err = decoder.Decode(&configs)
 	if err != nil {
-		return fmt.Errorf("cannot decode config JSON: %v", err)
+		return []string{}, fmt.Errorf("cannot decode config JSON: %v", err)
 	}
 	for i := range configs {
 		id = 0
 		err = generatePatron(configs[i])
 		if err != nil {
-			return err
+			return []string{}, err
 		}
+		patrons = append(patrons, configs[i].PatronName)
 	}
-	return nil
+	return patrons, nil
 }
