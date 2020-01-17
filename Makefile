@@ -95,13 +95,12 @@ mongo_build: $(CMD_FILES) $(PKG_FILES)
 mongo_install: mongo_build
 	mv $(MAIN_MONGO_PATH)/wal-g $(GOBIN)/wal-g
 
-mongo_features: install deps
+mongo_features:
 	set -e
 	rm -rf ./tests_func/wal-g
 	mkdir -p ./tests_func/wal-g
 	cp -a `ls -A | grep -v "tests_func"` tests_func/wal-g/
 	cd tests_func/ && MONGO_MAJOR=$(MONGO_MAJOR) MONGO_VERSION=$(MONGO_VERSION) go test -timeout 40m --godog.stop-on-failure --godog.format=pretty
-	rm -rf tests_func/wal-g/
 
 redis_test: install deps redis_build lint unlink_brotli redis_integration_test
 
@@ -150,7 +149,7 @@ go_deps:
 	dep ensure -update github.com/cyberdelia/lzo
 	sed -i 's|\(#cgo LDFLAGS:\) .*|\1 -Wl,-Bstatic -llzo2 -Wl,-Bdynamic|' vendor/github.com/cyberdelia/lzo/lzo.go
 
-link_external_deps: link_brotli link_libsodium
+link_external_deps: link_brotli
 
 unlink_external_deps: unlink_brotli unlink_libsodium
 

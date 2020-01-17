@@ -390,3 +390,28 @@ func MongoPurgeBackupsAfterTime(testContext *TestContextType, containerName stri
 	_, err := RunCommandInContainer(testContext, containerName, command)
 	return err
 }
+
+func MongoOplogPush(testContext *TestContextType, containerName string) error {
+	walgCliPath, walgConfPath := walgPaths(testContext.Env)
+
+	command := []string{walgCliPath, "--config", walgConfPath, "oplog-push", "--confirm"}
+	_, err := RunCommandInContainer(testContext, containerName, command)
+	return err
+}
+
+func MongoOplogFetch(testContext *TestContextType, containerName string, backupId int, timestampId int) error {
+	walgCliPath, walgConfPath := walgPaths(testContext.Env)
+
+	backupEntries, err := GetBackups(testContext, containerName)
+	if err != nil {
+		return fmt.Errorf("error in restoring backup by id: %v", err)
+	}
+
+	backupName := backupEntries[len(backupEntries) - 1 - backupId]
+	timestamp := testContext.AuxData.Timestamps[timestampId].Format(time.RFC3339)
+	command := []string{walgCliPath, "--config", walgConfPath, "oplog-fetch",
+		"--since", backupName, "--until", timestamp, "--confirm"}
+
+	_, err = RunCommandInContainer(testContext, containerName, command)
+	return err
+}

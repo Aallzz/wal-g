@@ -163,6 +163,7 @@ type SafeStorageType struct {
 
 type AuxData struct {
 	Timestamps map[int]time.Time
+	DatabaseSnap map[int][]UserData
 }
 
 type TestContextType struct {

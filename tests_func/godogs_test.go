@@ -1,9 +1,11 @@
 package functest
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 
 	testConf "github.com/wal-g/wal-g/tests_func/config"
 	testHelper "github.com/wal-g/wal-g/tests_func/helpers"
+	testLoad "github.com/wal-g/wal-g/tests_func/load"
 	testUtils "github.com/wal-g/wal-g/tests_func/utils"
 
 	"github.com/DATA-DOG/godog"
@@ -28,6 +31,7 @@ func FeatureContext(s *godog.Suite) {
 	s.BeforeFeature(func(feature *gherkin.Feature) {
 		testContext.TestData = make(map[string]map[string]map[string][]testHelper.DatabaseRecord)
 		testContext.AuxData.Timestamps = make(map[int]time.Time)
+		testContext.AuxData.DatabaseSnap = make(map[int][]testHelper.UserData)
 		if err := StartRecreate(testContext); err != nil {
 			log.Fatalln(err)
 		}
@@ -93,6 +97,119 @@ func FeatureContext(s *godog.Suite) {
 	s.Step(`^we delete backups retain (\d+) after #(\d+) timestamp via mongodb(\d+)$`, deleteBackupsRetainAfterTimeViaMongodb)
 	s.Step(`^we create timestamp #(\d+) via mongodb(\d+)$`, createTimestamp)
 	s.Step(`^we wait for (\d+) seconds$`, wait)
+
+	s.Step(`^oplog archive is on mongodb(\d+)$`, sendOplogOn)
+	s.Step(`^we load mongodb(\d+) with "([^"]*)" config$`, loadMongodbWithConfig)
+	s.Step(`^we save mongodb(\d+) data #(\d+)$`, saveMongodbData)
+	s.Step(`^mongodb(\d+) has no data$`, cleanMongoDb)
+	s.Step(`^we restore from #(\d+) backup to #(\d+) timestamp to mongodb(\d+)$`, mongodbRestoreOplog)
+	s.Step(`^we have same data in #(\d+) and #(\d+)$`, sameDataCheck)
+
+}
+
+func sameDataCheck(dataId1, dataId2 int) error {
+	if data1, ok := testContext.AuxData.DatabaseSnap[dataId1]; ok {
+		if data2, ok := testContext.AuxData.DatabaseSnap[dataId2]; ok {
+			if !reflect.DeepEqual(data1, data2) {
+				fmt.Println(data1)
+				fmt.Println("-0000---")
+				fmt.Println(data2)
+				return fmt.Errorf("expected the same data in %d and %d", dataId1, dataId2)
+			}
+			return nil
+		}
+		return fmt.Errorf("no data is saved for with id %d", dataId2)
+	}
+	return fmt.Errorf("no data is saved for with id %d", dataId1)
+}
+
+func mongodbRestoreOplog(backupId, timestampId, mongodbId int) error {
+	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
+	return testHelper.MongoOplogFetch(testContext, nodeName, backupId, timestampId)
+}
+
+func cleanMongoDb(mongodbId int) error {
+	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
+	connection, _ := testHelper.AdminConnect(testContext, nodeName)
+
+	dbNames, err := connection.ListDatabaseNames(testContext.Context, bson.M{})
+	if err != nil {
+		return fmt.Errorf("error in getting data from mongodb: %v", err)
+	}
+
+	for _, dbName := range dbNames {
+		if dbName == "local" || dbName == "config" || dbName == "admin" {
+			continue
+		}
+		err := connection.Database(dbName).Drop(testContext.Context)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func saveMongodbData(mongodbId, dataId int) error {
+	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
+	connection, err := testHelper.AdminConnect(testContext, nodeName)
+	if err != nil {
+		return err
+	}
+	rowsData, err := testHelper.GetAllUserData(testContext.Context, connection)
+	if err != nil {
+		return err
+	}
+	fmt.Println("SAVE DATA ", dataId, ": ")
+	fmt.Println(rowsData)
+	testContext.AuxData.DatabaseSnap[dataId] = rowsData
+	return nil
+}
+
+func loadMongodbWithConfig(mongodbId int, configFile string) error {
+	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
+
+	patrons, err := testLoad.GeneratePatronsFromFile(configFile)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8050*time.Millisecond)
+	defer cancel()
+
+	for _, patronFile := range patrons {
+		err := func() error {
+			f, err := os.Open(patronFile)
+			if err != nil {
+				return fmt.Errorf("cannot read patron: %v", err)
+			}
+			defer f.Close()
+			roc, _, err := testLoad.ReadRawMongoOps(ctx, f, 3)
+			if err != nil {
+				return err
+			}
+			cli, err := testHelper.EnvDBConnect(testContext, nodeName)
+			if err != nil {
+				return err
+			}
+			cmdc, _ := testLoad.MakeMongoOps(ctx, cli, roc)
+			// put all results somewhere for stats maybe
+			c := testLoad.RunMongoOpFuncs(ctx, cmdc, 3, 3)
+			for cc := range c {
+				fmt.Println(cc)
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sendOplogOn(mongodbId int) error {
+	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
+	return testHelper.MongoOplogPush(testContext, nodeName)
 }
 
 func wait(cnt int) error {
@@ -173,6 +290,7 @@ func testMongodbConnect(mongodbId int) error {
 	const timeoutInterval = 100 * time.Millisecond
 	for i := 0; i < 25; i++ {
 		connection, _ := testHelper.EnvDBConnect(testContext, nodeName)
+		fmt.Println(nodeName)
 		err := connection.Database(nodeName).Client().Ping(testContext.Context, nil)
 		if err == nil {
 			return nil
@@ -425,18 +543,18 @@ func TestMain(m *testing.M) {
 		log.Fatalln(err)
 	}
 
-	if cleanEnv {
-		env, err := ReadEnv(testConf.Env["ENV_FILE"])
-		if err != nil {
-			log.Fatalln(err)
-		}
-		testContext.Env = env
-
-		if err := ShutdownEnv(testContext); err != nil {
-			log.Fatal(err)
-		}
-		os.Exit(0)
-	}
+	//if cleanEnv {
+	//	env, err := ReadEnv(testConf.Env["ENV_FILE"])
+	//	if err != nil {
+	//		log.Fatalln(err)
+	//	}
+	//	testContext.Env = env
+	//
+	//	if err := ShutdownEnv(testContext); err != nil {
+	//		log.Fatal(err)
+	//	}
+	//	os.Exit(0)
+	//}
 
 	status := godog.RunWithOptions("godogs", func(s *godog.Suite) {
 		FeatureContext(s)
@@ -446,11 +564,11 @@ func TestMain(m *testing.M) {
 		status = st
 	}
 
-	if testUtils.ParseEnvLines(os.Environ())["DEBUG"] == "" {
-		if err := ShutdownEnv(testContext); err != nil {
-			log.Fatal(err)
-		}
-	}
+	//if testUtils.ParseEnvLines(os.Environ())["DEBUG"] == "" {
+	//	if err := ShutdownEnv(testContext); err != nil {
+	//		log.Fatal(err)
+	//	}
+	//}
 
 	os.Exit(status)
 }
