@@ -37,6 +37,16 @@ func NewDBApplier(uri string) *DBApplier {
 // Apply runs working cycle that applies oplog records.
 // TODO: filter noop, sessions ...
 func (dba *DBApplier) Apply(ctx context.Context, ch chan Record, wg *sync.WaitGroup) (chan error, error) {
+
+	var skipNs = map[string]struct{}{
+		"config.system.sessions":   {},
+		"config.cache.collections": {},
+		"config.mongos":            {},
+		"config.lockpings":         {},
+		"admin.system.version":     {},
+	}
+
+
 	mc, err := internal.NewMongoClient(ctx, dba.uri)
 	dba.mc = mc
 	if err != nil {
@@ -58,6 +68,9 @@ func (dba *DBApplier) Apply(ctx context.Context, ch chan Record, wg *sync.WaitGr
 		for opr := range ch {
 			tracelog.DebugLogger.Printf("Applyer receieved op %s (%s on %s)", opr.TS, opr.OP, opr.NS)
 
+			if _, ok := skipNs[opr.NS]; ok {
+				continue
+			}
 			op := db.Oplog{}
 			if err := bson.Unmarshal(opr.Data, &op); err != nil {
 				errc <- fmt.Errorf("can not unmarshall oplog entry: %w", err)

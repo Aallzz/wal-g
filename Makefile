@@ -95,7 +95,7 @@ mongo_build: $(CMD_FILES) $(PKG_FILES)
 mongo_install: mongo_build
 	mv $(MAIN_MONGO_PATH)/wal-g $(GOBIN)/wal-g
 
-mongo_features:
+mongo_features: install deps
 	set -e
 	rm -rf ./tests_func/wal-g
 	mkdir -p ./tests_func/wal-g
