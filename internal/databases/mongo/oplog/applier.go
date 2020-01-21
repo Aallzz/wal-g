@@ -44,8 +44,8 @@ func (dba *DBApplier) Apply(ctx context.Context, ch chan Record, wg *sync.WaitGr
 		"config.mongos":            {},
 		"config.lockpings":         {},
 		"admin.system.version":     {},
+		"admin.system.users":      {},
 	}
-
 
 	mc, err := internal.NewMongoClient(ctx, dba.uri)
 	dba.mc = mc

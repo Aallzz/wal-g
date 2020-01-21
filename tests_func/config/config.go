@@ -21,7 +21,7 @@ var Env = map[string]string{
 	"MONGO_ADMIN_USERNAME": "admin",
 	"MONGO_ADMIN_PASSWORD": "password",
 	"MONGO_ADMIN_DB_NAME":  "admin",
-	"MONGO_ADMIN_ROLES":    "anyAction",
+	"MONGO_ADMIN_ROLES":    "root",
 	"MONGO_EXPOSE_MONGOD":  "27018",
 	"MONGO_EXPOSE_SSH":     "22",
 

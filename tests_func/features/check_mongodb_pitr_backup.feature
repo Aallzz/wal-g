@@ -14,43 +14,53 @@ Feature: MongoDB PITR backups check
 
   Scenario: First backup was done successfully
     Given mongodb01 has test mongodb data test1
-    When we create mongodb01 backup
+    When we create timestamp #10 via mongodb01
+    And we wait for 5 seconds
+    And we create mongodb01 backup
     Then we got 1 backup entries of mongodb01
 
   Scenario: First database data saved successfully
-    When we load mongodb01 with "load/mongo_load_config.json" config
+    When we load mongodb01 with "load/mlc.json" config
+    And we wait for 5 seconds
     And we create timestamp #0 via mongodb01
     And we save mongodb01 data #0
     Then we got 1 backup entries of mongodb01
 
   Scenario: Second backup was done successfully
     Given mongodb01 has test mongodb data test2
+    When we create timestamp #11 via mongodb01
+    And we wait for 5 seconds
     When we create mongodb01 backup
     Then we got 2 backup entries of mongodb01
 
   Scenario: Second database data saved successfully
     When we load mongodb01 with "load/mongo_load_config2.json" config
+    And we wait for 5 seconds
     And we create timestamp #1 via mongodb01
     And we save mongodb01 data #1
     Then we got 2 backup entries of mongodb01
 
   Scenario: First "ASD" restored successfully
     Given mongodb02 has no data
-    When we restore #0 backup to mongodb02
-#    And we restore from #0 backup to #0 timestamp to mongodb02
+    When we restore #1 backup to mongodb02
+    And we wait for 3 seconds
+    And we restore from #10 timestamp to #0 timestamp to mongodb02
+    And we wait for 3 seconds
     And we save mongodb02 data #2
     Then we have same data in #0 and #2
 
   Scenario: Second "ASD" restored successfully
     Given mongodb02 has no data
-    When we restore #0 backup to mongodb02
-    And we restore from #0 backup to #1 timestamp to mongodb02
+    When we restore #1 backup to mongodb02
+    And we wait for 3 seconds
+    And we restore from #10 timestamp to #1 timestamp to mongodb02
+    And we wait for 3 seconds
     And we save mongodb02 data #3
-    Then we have same data in #0 and #3
+    Then we have same data in #1 and #3
 
   Scenario: Third "ASD" restored successfully
     Given mongodb02 has no data
-    When we restore #1 backup to mongodb02
-    And we restore from #1 backup to #1 timestamp to mongodb02
+    When we restore #0 backup to mongodb02
+    And we restore from #11 timestamp to #1 timestamp to mongodb02
     And we save mongodb02 data #4
-    Then we have same data in #0 and #3
+    Then we have same data in #1 and #4

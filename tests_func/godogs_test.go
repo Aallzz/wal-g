@@ -102,7 +102,7 @@ func FeatureContext(s *godog.Suite) {
 	s.Step(`^we load mongodb(\d+) with "([^"]*)" config$`, loadMongodbWithConfig)
 	s.Step(`^we save mongodb(\d+) data #(\d+)$`, saveMongodbData)
 	s.Step(`^mongodb(\d+) has no data$`, cleanMongoDb)
-	s.Step(`^we restore from #(\d+) backup to #(\d+) timestamp to mongodb(\d+)$`, mongodbRestoreOplog)
+	s.Step(`^we restore from #(\d+) timestamp to #(\d+) timestamp to mongodb(\d+)$`, mongodbRestoreOplog)
 	s.Step(`^we have same data in #(\d+) and #(\d+)$`, sameDataCheck)
 
 }
@@ -123,9 +123,9 @@ func sameDataCheck(dataId1, dataId2 int) error {
 	return fmt.Errorf("no data is saved for with id %d", dataId1)
 }
 
-func mongodbRestoreOplog(backupId, timestampId, mongodbId int) error {
+func mongodbRestoreOplog(timestampIdFrom, timestampIdUntil, mongodbId int) error {
 	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
-	return testHelper.MongoOplogFetch(testContext, nodeName, backupId, timestampId)
+	return testHelper.MongoOplogFetch(testContext, nodeName, timestampIdFrom, timestampIdUntil)
 }
 
 func cleanMongoDb(mongodbId int) error {
@@ -169,6 +169,7 @@ func saveMongodbData(mongodbId, dataId int) error {
 func loadMongodbWithConfig(mongodbId int, configFile string) error {
 	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
 
+	fmt.Println("WAS")
 	patrons, err := testLoad.GeneratePatronsFromFile(configFile)
 	if err != nil {
 		return err
@@ -179,7 +180,7 @@ func loadMongodbWithConfig(mongodbId int, configFile string) error {
 
 	for _, patronFile := range patrons {
 		err := func() error {
-			f, err := os.Open(patronFile)
+			f, err := os.Open(patronFile + ".json")
 			if err != nil {
 				return fmt.Errorf("cannot read patron: %v", err)
 			}
@@ -188,15 +189,17 @@ func loadMongodbWithConfig(mongodbId int, configFile string) error {
 			if err != nil {
 				return err
 			}
-			cli, err := testHelper.EnvDBConnect(testContext, nodeName)
+			cli, err := testHelper.AdminConnect(testContext, nodeName)
 			if err != nil {
 				return err
 			}
-			cmdc, _ := testLoad.MakeMongoOps(ctx, cli, roc)
+			cmdc, erc := testLoad.MakeMongoOps(ctx, cli, roc)
 			// put all results somewhere for stats maybe
 			c := testLoad.RunMongoOpFuncs(ctx, cmdc, 3, 3)
-			for cc := range c {
-				fmt.Println(cc)
+			for _ = range c {
+			}
+			for x := range erc {
+				fmt.Println(x)
 			}
 			return nil
 		}()
@@ -336,6 +339,7 @@ func testMongodbPrimaryRole(mongodbId int) error {
 func authenticateOnMongodb(mongodbId int) error {
 	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
 	creds := testHelper.AdminCreds(testContext.Env)
+
 	roles := "["
 	for _, value := range creds.Roles {
 		roles = roles + "'" + value + "', "
@@ -351,6 +355,7 @@ func authenticateOnMongodb(mongodbId int) error {
 	if err != nil {
 		return err
 	}
+
 	if strings.Contains(response, "command createUser requires authentication") {
 		command = append(command, "-u", creds.Username, "-p", creds.Password)
 		response, err = testHelper.RunCommandInContainer(testContext, nodeName, command)
@@ -363,6 +368,59 @@ func authenticateOnMongodb(mongodbId int) error {
 		!strings.Contains(response, "already exists") {
 		return fmt.Errorf("can not initialize auth: %s", response)
 	}
+
+	newRoleCmd := []string{"mongo", "mongodb://admin:password@127.0.0.1:27018/admin", "--eval",
+		`db.createRole( {
+    		role: "interalUseOnlyOplogRestore",
+  			privileges: [
+      			{ resource: { anyResource: true }, actions: [ "anyAction" ] }
+    		],
+    		roles: []
+   		})`,
+	}
+
+	roleResp, err := testHelper.RunCommandInContainer(testContext, nodeName, newRoleCmd)
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(roleResp, "command createUser requires authentication") {
+		newRoleCmd = append(newRoleCmd, "-u", creds.Username, "-p", creds.Password)
+		roleResp, err = testHelper.RunCommandInContainer(testContext, nodeName, newRoleCmd)
+		if err != nil {
+			return err
+		}
+	}
+	if !(strings.Contains(roleResp, `"role" : "interalUseOnlyOplogRestore",`) ||
+		strings.Contains(roleResp, `Role "interalUseOnlyOplogRestore@admin" already exists`)) {
+		return fmt.Errorf("can not create role for auth: %s", roleResp)
+	}
+
+	updRoleCmd := []string{"mongo", "mongodb://admin:password@127.0.0.1:27018/admin", "--eval",
+		`db.grantRolesToUser(
+			"admin",
+    		["interalUseOnlyOplogRestore"]
+   		)`,
+	}
+
+	updRoleResp, err := testHelper.RunCommandInContainer(testContext, nodeName, updRoleCmd)
+	if err != nil {
+		return err
+	}
+
+	if strings.Contains(updRoleResp, "command createUser requires authentication") {
+		updRoleCmd = append(updRoleCmd, "-u", creds.Username, "-p", creds.Password)
+		roleResp, err = testHelper.RunCommandInContainer(testContext, nodeName, updRoleCmd)
+		if err != nil {
+			return err
+		}
+	}
+
+	fmt.Println(updRoleResp)
+	if !strings.Contains(updRoleResp, ` `) {
+		return fmt.Errorf("can not create role for auth: %s", updRoleResp)
+	}
+
 	return nil
 }
 

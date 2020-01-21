@@ -52,7 +52,7 @@ func connectHostPort(context context.Context, host string, port uint16) (*mongo.
 }
 
 func connect(context context.Context, user string, password string, dbname string, host string, port uint16) (*mongo.Client, error) {
-	uri := fmt.Sprintf("mongodb://%s:%s@%s:%d/%s?connect=direct&authMechanism=SCRAM-SHA-1", user, password, host, port, dbname)
+	uri := fmt.Sprintf("mongodb://%s:%s@%s:%d/%s?connect=direct&authMechanism=SCRAM-SHA-1&autoReconnect=true&socketTimeoutMS=3000&connectTimeoutMS=3000&readPreference=primary", user, password, host, port, dbname)
 	client, err := mongo.NewClient(options.Client().ApplyURI(uri))
 	if err != nil {
 		return nil, fmt.Errorf("error in connecting to mongo via host, port, dbname and user creds: %v", err)
@@ -277,7 +277,10 @@ func GetAllUserData(context context.Context, connection *mongo.Client) ([]UserDa
 			if isSystemCollection(table) {
 				continue
 			}
-			if dbName == "local" || dbName == "config" {
+			if strings.Contains(table, ".") {
+				continue
+			}
+			if dbName == "local" || dbName == "config" || dbName == "admin"{
 				continue
 			}
 			findOptions := options.Find()
@@ -394,24 +397,27 @@ func MongoPurgeBackupsAfterTime(testContext *TestContextType, containerName stri
 func MongoOplogPush(testContext *TestContextType, containerName string) error {
 	walgCliPath, walgConfPath := walgPaths(testContext.Env)
 
-	command := []string{walgCliPath, "--config", walgConfPath, "oplog-push", "--confirm"}
-	_, err := RunCommandInContainer(testContext, containerName, command)
-	return err
+	command := []string{walgCliPath, "--config", walgConfPath, "oplog-push"}
+	go func() {
+		x, _ := RunCommandInContainer(testContext, containerName, command)
+		fmt.Println("oplog-push\t", x)
+	}()
+	return nil
 }
 
-func MongoOplogFetch(testContext *TestContextType, containerName string, backupId int, timestampId int) error {
+func MongoOplogFetch(testContext *TestContextType, containerName string, timestampIdFrom int, timestampIdUntil int) error {
 	walgCliPath, walgConfPath := walgPaths(testContext.Env)
 
-	backupEntries, err := GetBackups(testContext, containerName)
-	if err != nil {
-		return fmt.Errorf("error in restoring backup by id: %v", err)
-	}
+	timestampFrom := strconv.FormatInt(testContext.AuxData.Timestamps[timestampIdFrom].Unix(), 10) + ".1"
+	timestampUntil := strconv.FormatInt(testContext.AuxData.Timestamps[timestampIdUntil].Unix(), 10) + ".1"
 
-	backupName := backupEntries[len(backupEntries) - 1 - backupId]
-	timestamp := testContext.AuxData.Timestamps[timestampId].Format(time.RFC3339)
-	command := []string{walgCliPath, "--config", walgConfPath, "oplog-fetch",
-		"--since", backupName, "--until", timestamp, "--confirm"}
+	fmt.Println("timestampFrom: ", timestampFrom)
+	fmt.Println("timestampUntil: ", timestampUntil)
+	time.Sleep(4 * time.Second)
+	command := []string{walgCliPath, "--config", walgConfPath, "oplog-replay",
+		timestampFrom, timestampUntil}
 
-	_, err = RunCommandInContainer(testContext, containerName, command)
+	x, err := RunCommandInContainer(testContext, containerName, command)
+	fmt.Println("oplog-replay\t", x)
 	return err
 }
