@@ -405,11 +405,70 @@ func MongoOplogPush(testContext *TestContextType, containerName string) error {
 	return nil
 }
 
-func MongoOplogFetch(testContext *TestContextType, containerName string, timestampIdFrom int, timestampIdUntil int) error {
+func lessTs(a, b string) (bool, error) {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	if len(as) == 2 && len(bs) == 2 {
+		return as[0] < bs[0] || (as[0] == bs[0] && as[1] <= bs[1]), nil
+	}
+	return false, fmt.Errorf("wrong format of timestamps: %s, %s", a, b)
+}
+
+func arcTsExists(testContext *TestContextType, containerName string, timestamp string) (bool, error) {
+	command := []string{"ls", "/export/dbaas/mongodb-backup/test_uuid/test_mongodb/oplog_005/", "-1"}
+	resp, err := RunCommandInContainer(testContext, containerName, command)
+	fmt.Printf("\n\n\n")
+	fmt.Println(resp)
+	fmt.Printf("\n\n\n")
+
+	r, _ := regexp.Compile(`(oplog_(\d+).(\d+)_(\d+).(\d+).br)`)
+	as := r.FindAllString(resp, -1)
+
+	fmt.Printf("\n\n\n")
+	for _, a := range as {
+		fmt.Println(a)
+		rd, _ := regexp.Compile(`(\d+).(\d+)`)
+		ds := rd.FindAllString(a, -1)
+		fmt.Println(ds)
+		if len(ds) != 2 {
+			return false, fmt.Errorf("Wrong archive name format: %s", a)
+		}
+		fa, err := lessTs(ds[0], a)
+		if err != nil {
+			return false, err
+		}
+		fb, err := lessTs(a, ds[1])
+		if err != nil {
+			return false, err
+		}
+		if fa && fb {
+			return true, nil
+		}
+	}
+	fmt.Printf("\n\n\n")
+	return true, err
+}
+
+func MongoOplogFetch(testContext *TestContextType, containerName string, storageName string, timestampIdFrom int, timestampIdUntil int) error {
 	walgCliPath, walgConfPath := walgPaths(testContext.Env)
 
 	timestampFrom := strconv.FormatInt(testContext.AuxData.Timestamps[timestampIdFrom].Unix(), 10) + ".1"
 	timestampUntil := strconv.FormatInt(testContext.AuxData.Timestamps[timestampIdUntil].Unix(), 10) + ".1"
+
+	c := false
+	var err error
+
+	for !c {
+		fr, err := arcTsExists(testContext, storageName, timestampFrom)
+		if err != nil {
+			return err
+		}
+		un, err := arcTsExists(testContext, storageName, timestampUntil)
+		if err != nil {
+			return err
+		}
+		c = fr && un
+	}
 
 	fmt.Println("timestampFrom: ", timestampFrom)
 	fmt.Println("timestampUntil: ", timestampUntil)

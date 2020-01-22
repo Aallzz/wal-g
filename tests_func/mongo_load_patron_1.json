@@ -1,4 +1,4 @@
 [
-{"op":"c", "db":"t1", "id": 1, "dc":{"insert":"c1", "documents": [{"kk1": "vv2", "kk1": "vv1"}, {"kk1": "vv1", "kk1": "vv2"}]}},
-{"op":"c", "db":"t1", "id": 2, "dc":{"insert":"c1", "documents": [{"kk3": "vv1", "kk1": "vv3"}, {"kk2": "vv1", "kk2": "vv2"}]}}
+{"op":"c", "db":"t1", "id": 1, "dc":{"insert":"c1", "documents": [{"kk2": "vv2", "kk2": "vv1", "kk3": "vv2"}, {"kk1": "vv2", "kk1": "vv3", "kk2": "vv2"}]}},
+{"op":"c", "db":"t1", "id": 2, "dc":{"insert":"c1", "documents": [{"kk1": "vv1", "kk2": "vv1"}, {"kk3": "vv3", "kk3": "vv1"}]}}
 ]

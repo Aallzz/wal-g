@@ -125,7 +125,8 @@ func sameDataCheck(dataId1, dataId2 int) error {
 
 func mongodbRestoreOplog(timestampIdFrom, timestampIdUntil, mongodbId int) error {
 	nodeName := fmt.Sprintf("mongodb%02d.test_net_%s", mongodbId, testContext.Env["TEST_ID"])
-	return testHelper.MongoOplogFetch(testContext, nodeName, timestampIdFrom, timestampIdUntil)
+	storageName := fmt.Sprintf("minio%02d.test_net_%s", 1, testContext.Env["TEST_ID"])
+	return testHelper.MongoOplogFetch(testContext, nodeName, storageName, timestampIdFrom, timestampIdUntil)
 }
 
 func cleanMongoDb(mongodbId int) error {
